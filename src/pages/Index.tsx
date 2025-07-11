@@ -4,16 +4,16 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useTheme } from "next-themes";
-import { 
-  Plus, 
-  BookOpen, 
-  Search, 
-  Moon, 
-  Sun, 
+import {
+  Plus,
+  BookOpen,
+  Search,
+  Moon,
+  Sun,
   Play,
   BarChart3,
   Filter,
-  GraduationCap
+  GraduationCap,
 } from "lucide-react";
 
 import { Flashcard } from "@/components/Flashcard";
@@ -21,6 +21,16 @@ import { FlashcardForm } from "@/components/FlashcardForm";
 import { SubjectFilter } from "@/components/SubjectFilter";
 import { ProgressTracker } from "@/components/ProgressTracker";
 import { StudySession } from "@/components/StudySession";
+// import Router, { useRouter } from "next/router";
+
+import {
+  createFlashcard,
+  deleteFlashcard,
+  getFlashcards,
+  updateFlashcard,
+} from "@/lib/firebase-flashcard";
+import { Timestamp } from "firebase/firestore";
+import { useNavigate } from "react-router-dom";
 
 interface FlashcardData {
   id: string;
@@ -29,7 +39,7 @@ interface FlashcardData {
   subject: string;
   tags: string[];
   difficulty: "easy" | "medium" | "hard";
-  createdAt: Date;
+  createdAt: Timestamp | Date;
 }
 
 const Index = () => {
@@ -41,40 +51,24 @@ const Index = () => {
   const [showForm, setShowForm] = useState(false);
   const [showStudySession, setShowStudySession] = useState(false);
   const [editingCard, setEditingCard] = useState<FlashcardData | null>(null);
-  const [currentView, setCurrentView] = useState<"library" | "study" | "progress">("library");
+  const [currentView, setCurrentView] = useState<
+    "library" | "study" | "progress"
+  >("library");
+
+  const navigate = useNavigate();
 
   // Sample data for demonstration
   useEffect(() => {
-    const sampleCards: FlashcardData[] = [
-      {
-        id: "1",
-        question: "What is the total number of fundamental rights guaranteed by the Indian Constitution?",
-        answer: "The Indian Constitution guarantees 6 fundamental rights: Right to Equality, Right to Freedom, Right against Exploitation, Right to Freedom of Religion, Cultural and Educational Rights, and Right to Constitutional Remedies.",
-        subject: "Polity",
-        tags: ["fundamental rights", "constitution"],
-        difficulty: "medium",
-        createdAt: new Date("2024-01-15")
-      },
-      {
-        id: "2",
-        question: "Who was known as the 'Iron Man of India'?",
-        answer: "Sardar Vallabhbhai Patel was known as the 'Iron Man of India' for his role in the political integration of India after independence.",
-        subject: "History",
-        tags: ["freedom fighters", "independence"],
-        difficulty: "easy",
-        createdAt: new Date("2024-01-16")
-      },
-      {
-        id: "3",
-        question: "What is the SI unit of electric current?",
-        answer: "The SI unit of electric current is Ampere (A), named after the French physicist André-Marie Ampère.",
-        subject: "General Science",
-        tags: ["physics", "units"],
-        difficulty: "easy",
-        createdAt: new Date("2024-01-17")
+    const fetchCards = async () => {
+      try {
+        const data = await getFlashcards();
+        setFlashcards(data);
+      } catch (error) {
+        console.error("Failed to load flashcards:", error);
       }
-    ];
-    setFlashcards(sampleCards);
+    };
+
+    fetchCards();
   }, []);
 
   // Filter and search logic
@@ -82,59 +76,92 @@ const Index = () => {
     let filtered = flashcards;
 
     if (selectedSubjects.length > 0) {
-      filtered = filtered.filter(card => selectedSubjects.includes(card.subject));
+      filtered = filtered.filter((card) =>
+        selectedSubjects.includes(card.subject)
+      );
     }
 
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(card => 
-        card.question.toLowerCase().includes(query) ||
-        card.answer.toLowerCase().includes(query) ||
-        card.tags.some(tag => tag.toLowerCase().includes(query))
+      filtered = filtered.filter(
+        (card) =>
+          card.question.toLowerCase().includes(query) ||
+          card.answer.toLowerCase().includes(query) ||
+          card.tags.some((tag) => tag.toLowerCase().includes(query))
       );
     }
 
     setFilteredCards(filtered);
   }, [flashcards, selectedSubjects, searchQuery]);
 
-  const subjects = Array.from(new Set(flashcards.map(card => card.subject)));
+  const subjects = Array.from(new Set(flashcards.map((card) => card.subject)));
 
-  const handleCreateCard = (cardData: Omit<FlashcardData, "id" | "createdAt">) => {
-    const newCard: FlashcardData = {
-      ...cardData,
-      id: Date.now().toString(),
-      createdAt: new Date()
-    };
-    setFlashcards([newCard, ...flashcards]);
-    setShowForm(false);
-  };
+  const handleCreateCard = async (
+    cardData: Omit<FlashcardData, "id" | "createdAt">
+  ) => {
+    try {
+      const saved = await createFlashcard(cardData);
 
-  const handleEditCard = (cardData: Omit<FlashcardData, "id" | "createdAt">) => {
-    if (editingCard) {
-      const updatedCards = flashcards.map(card =>
-        card.id === editingCard.id
-          ? { ...card, ...cardData }
-          : card
-      );
-      setFlashcards(updatedCards);
-      setEditingCard(null);
+      const newCard: FlashcardData = {
+        ...cardData,
+        id: saved.id,
+        createdAt: saved.createdAt, // already a Date
+      };
+
+      setFlashcards((prev) => [newCard, ...prev]);
       setShowForm(false);
+    } catch (err) {
+      console.error("Error creating card:", err);
     }
   };
 
-  const handleDeleteCard = (id: string) => {
-    setFlashcards(flashcards.filter(card => card.id !== id));
+  const handleEditCard = async (
+    cardData: Omit<FlashcardData, "id" | "createdAt">
+  ) => {
+    if (editingCard) {
+      try {
+        const updatedCard: FlashcardData = {
+          ...editingCard,
+          ...cardData,
+        };
+
+        // Assuming you have an `updateFlashcard` method in firebase-flashcard.ts
+        await updateFlashcard(updatedCard.id, cardData);
+
+        setFlashcards((prev) =>
+          prev.map((card) => (card.id === updatedCard.id ? updatedCard : card))
+        );
+
+        setEditingCard(null);
+        setShowForm(false);
+      } catch (err) {
+        console.error("Error updating flashcard:", err);
+      }
+    }
+  };
+
+  const handleDeleteCard = async (id: string) => {
+    try {
+      await deleteFlashcard(id);
+      setFlashcards((prev) => prev.filter((card) => card.id !== id));
+    } catch (error) {
+      console.error("Failed to delete card:", error);
+    }
   };
 
   const handleSubjectToggle = (subject: string) => {
-    setSelectedSubjects(prev =>
+    setSelectedSubjects((prev) =>
       prev.includes(subject)
-        ? prev.filter(s => s !== subject)
+        ? prev.filter((s) => s !== subject)
         : [...prev, subject]
     );
   };
 
-  const handleStudyComplete = (results: { correct: number; total: number; timeSpent: number }) => {
+  const handleStudyComplete = (results: {
+    correct: number;
+    total: number;
+    timeSpent: number;
+  }) => {
     setShowStudySession(false);
     setCurrentView("progress");
     // Here you would typically save the study session results
@@ -146,7 +173,7 @@ const Index = () => {
     correctAnswers: 8,
     totalAttempts: 12,
     streakDays: 5,
-    timeSpent: 45
+    timeSpent: 45,
   };
 
   if (showStudySession) {
@@ -171,13 +198,17 @@ const Index = () => {
               setShowForm(false);
               setEditingCard(null);
             }}
-            initialData={editingCard ? {
-              question: editingCard.question,
-              answer: editingCard.answer,
-              subject: editingCard.subject,
-              tags: editingCard.tags,
-              difficulty: editingCard.difficulty
-            } : undefined}
+            initialData={
+              editingCard
+                ? {
+                    question: editingCard.question,
+                    answer: editingCard.answer,
+                    subject: editingCard.subject,
+                    tags: editingCard.tags,
+                    difficulty: editingCard.difficulty,
+                  }
+                : undefined
+            }
           />
         </div>
       </div>
@@ -195,11 +226,15 @@ const Index = () => {
                 <GraduationCap className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gradient">SSC CGL Flashcards</h1>
-                <p className="text-sm text-muted-foreground">Smart study for government exams</p>
+                <h1 className="text-xl font-bold text-gradient">
+                  SSC CGL Flashcards
+                </h1>
+                <p className="text-sm text-muted-foreground">
+                  Smart study for government exams
+                </p>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-4">
               <nav className="hidden md:flex items-center gap-2">
                 <Button
@@ -219,13 +254,17 @@ const Index = () => {
                   Progress
                 </Button>
               </nav>
-              
+
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
               >
-                {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                {theme === "dark" ? (
+                  <Sun className="w-5 h-5" />
+                ) : (
+                  <Moon className="w-5 h-5" />
+                )}
               </Button>
             </div>
           </div>
@@ -236,8 +275,12 @@ const Index = () => {
         {currentView === "progress" ? (
           <div className="space-y-8">
             <div className="text-center">
-              <h2 className="text-3xl font-bold text-gradient mb-2">Your Progress</h2>
-              <p className="text-muted-foreground">Track your learning journey</p>
+              <h2 className="text-3xl font-bold text-gradient mb-2">
+                Your Progress
+              </h2>
+              <p className="text-muted-foreground">
+                Track your learning journey
+              </p>
             </div>
             <ProgressTracker stats={progressStats} />
           </div>
@@ -256,18 +299,20 @@ const Index = () => {
                   />
                 </div>
               </div>
-              
+
               <div className="flex gap-3">
                 <Button
-                  onClick={() => setShowStudySession(true)}
+                  onClick={() => navigate("/StudySession")}
                   className="study-button"
-                  disabled={filteredCards.length === 0 && flashcards.length === 0}
+                  disabled={
+                    filteredCards.length === 0 && flashcards.length === 0
+                  }
                 >
                   <Play className="w-4 h-4 mr-2" />
                   Start Study Session
                 </Button>
                 <Button
-                  onClick={() => setShowForm(true)}
+                  onClick={() => navigate("FlashcardForm")}
                   variant="outline"
                 >
                   <Plus className="w-4 h-4 mr-2" />
@@ -294,20 +339,30 @@ const Index = () => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Card className="flashcard">
                 <CardContent className="p-4 text-center">
-                  <div className="text-2xl font-bold text-primary">{flashcards.length}</div>
-                  <div className="text-sm text-muted-foreground">Total Cards</div>
+                  <div className="text-2xl font-bold text-primary">
+                    {flashcards.length}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Total Cards
+                  </div>
                 </CardContent>
               </Card>
               <Card className="flashcard">
                 <CardContent className="p-4 text-center">
-                  <div className="text-2xl font-bold text-secondary">{subjects.length}</div>
+                  <div className="text-2xl font-bold text-secondary">
+                    {subjects.length}
+                  </div>
                   <div className="text-sm text-muted-foreground">Subjects</div>
                 </CardContent>
               </Card>
               <Card className="flashcard">
                 <CardContent className="p-4 text-center">
-                  <div className="text-2xl font-bold text-accent">{filteredCards.length}</div>
-                  <div className="text-sm text-muted-foreground">Filtered Results</div>
+                  <div className="text-2xl font-bold text-accent">
+                    {filteredCards.length}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Filtered Results
+                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -325,7 +380,7 @@ const Index = () => {
                     tags={card.tags}
                     difficulty={card.difficulty}
                     onEdit={(id) => {
-                      const cardToEdit = flashcards.find(c => c.id === id);
+                      const cardToEdit = flashcards.find((c) => c.id === id);
                       if (cardToEdit) {
                         setEditingCard(cardToEdit);
                         setShowForm(true);
@@ -339,13 +394,18 @@ const Index = () => {
               <Card className="flashcard">
                 <CardContent className="p-12 text-center">
                   <BookOpen className="w-16 h-16 mx-auto mb-4 text-muted-foreground/50" />
-                  <h3 className="text-xl font-semibold mb-2">No flashcards found</h3>
+                  <h3 className="text-xl font-semibold mb-2">
+                    No flashcards found
+                  </h3>
                   <p className="text-muted-foreground mb-6">
-                    {flashcards.length === 0 
-                      ? "Create your first flashcard to get started!" 
+                    {flashcards.length === 0
+                      ? "Create your first flashcard to get started!"
                       : "Try adjusting your search or filter criteria."}
                   </p>
-                  <Button onClick={() => setShowForm(true)} className="study-button">
+                  <Button
+                    onClick={() => setShowForm(true)}
+                    className="study-button"
+                  >
                     <Plus className="w-4 h-4 mr-2" />
                     Create Flashcard
                   </Button>
